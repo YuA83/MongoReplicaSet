@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  mongo1:
+    image: mongo:latest
+    hostname: mongo1
+    container_name: mongo1
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root!
+    ports:
+      # 로컬 27017 포트로 요청이 들어오면 컨테이너의 27017 포트로 리다이렉트되도록 설정
+      - 27017:27017
+    volumes:
+      - ./data/db/replica/mongo1:/data/db
+      - ./mongodb.key:/etc/mongodb.key
+    command:
+      - "--replSet"
+      - "myReplicaSet"
+      - "--keyFile"
+      - "/etc/mongodb.key"
+      - "--bind_ip"
+      - "0.0.0.0"
+  mongo2:
+    image: mongo:latest
+    hostname: mongo2
+    container_name: mongo2
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root!
+    depends_on:
+      - mongo1
+    ports:
+      - 27018:27017
+    volumes:
+      - ./data/db/replica/mongo2:/data/db
+      - ./mongodb.key:/etc/mongodb.key
+    command:
+      - "--replSet"
+      - "myReplicaSet"
+      - "--keyFile"
+      - "/etc/mongodb.key"
+      - "--bind_ip"
+      - "0.0.0.0"
+  mongo3:
+    image: mongo:latest
+    hostname: mongo3
+    container_name: mongo3
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root!
+    depends_on:
+      - mongo2
+    ports:
+      - 27019:27017
+    volumes:
+      - ./data/db/replica/mongo3:/data/db
+      - ./mongodb.key:/etc/mongodb.key
+    command:
+      - "--replSet"
+      - "myReplicaSet"
+      - "--keyFile"
+      - "/etc/mongodb.key"
+      - "--bind_ip"
+      - "0.0.0.0"
+networks:
+  default:
+    name: mongoCluster
