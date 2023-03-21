@@ -1,56 +1,116 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const http = require("http");
-const mongoose = require("mongoose");
+
+/**
+ * https://www.mongodb.com/docs/drivers/node/current/quick-reference/
+ */
+const { MongoClient } = require("mongodb"); // using MongoDB Node.js Driver (Not mongoose)
 
 const app = express();
 const server = http.createServer(app);
 const port = 9700;
-const mongoURI =
-  //   "mongodb://root:root!@127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+1.8.0";
-  //   "mongodb://root:root!@127.0.0.1:27017,127.0.0.1:27018,127.0.0.1:27019/?authSource=admin&replicaSet=myReplicaSet&readPreference=primaryPreferred";
-  //   "mongodb://root:root!@127.0.0.1:27017/?authSource=admin&replicaSet=myReplicaSet&readPreference=primaryPreferred";
-  // "mongodb://root:root!@localhost:27017,localhost:27018,localhost:27019/?replicaSet=myReplicaSet";
-  "mongodb://root:root!@127.0.0.1:27017/?directConnection=true";
-
-const Users = require("./user");
 
 app.use(express.json());
 app.use(cookieParser());
 
-mongoose
-  .connect(mongoURI, { dbName: "test" })
-  .then(() => {
-    console.log("mongo connection success");
-  })
-  .catch((error) => {
-    console.error("mongo connection error" + error);
-  });
+const replicaSet = ["127.0.0.1:27017", "127.0.0.1:27018", "127.0.0.1:27019"]; // replicaSet hosts
+// const replicaSet = ["127.0.0.1:27018", "127.0.0.1:27019"];
+// const replicaSet = ["127.0.0.1:27019"];
 
-app.get("/", (req, res, next) => {
+let client; // connected mongoDB client
+
+const conn = async (index) => {
+  // mongoDB Client connection function
+  console.log(index);
+  console.log(replicaSet[index]);
+
+  MongoClient.connect(`mongodb://${replicaSet[index]}/test`, {
+    auth: {
+      username: "root", // mongosh username
+      password: "root!", // mongosh password
+    },
+    replicaSet: "myReplicaSet", // replicaSet name
+    authSource: "admin", // user's auth database
+    serverSelectionTimeoutMS: 2000, // server select timeout limit
+  })
+    .then((result) => {
+      // connectoin success mongoDB
+      console.log("ok");
+      client = result; // sync => so, sometimes...client is undefined
+    })
+    .catch(async (error) => {
+      // connection fail mongoDB
+      if (
+        index < replicaSet.length &&
+        error.message === `connect ECONNREFUSED ${replicaSet[index]}` // if mongoDB server down
+      ) {
+        console.log("retry..");
+        await conn(index + 1); // retry another replicaSet mongoDB
+      } else {
+        // other error
+        console.log("no...");
+      }
+    });
+};
+
+conn(0); // try connect mongoDB replicaSet
+
+app.get("/read", async (req, res, next) => {
+  // testing mongoDB client read
   try {
-    const { username, password } = req.body;
+    const db = client.db("test"); // using "test" database
+    const users = db.collection("users"); // using "users" collection
+    const user = await users.findOne();
+    const userList = await users.find().toArray(); // require toArray() if you want to get all data
+
+    console.log("Read OK");
+    res.send({
+      user: user,
+      userList: userList,
+    });
+  } catch (error) {
     console.log(
-      `Request User Data\n username: ${username}, password: ${password}`
+      "[ E R R O R ===================================== E R R O R ]"
+    );
+    console.error(error);
+    console.log(
+      "[ E R R O R ===================================== E R R O R ]"
     );
 
-    const userdata = new Users({
+    res.send("ERROR");
+  }
+});
+
+app.get("/write", async (req, res, next) => {
+  // testing mongoDB client write
+  try {
+    const db = client.db("test"); // using "test" database
+    const users = db.collection("users"); // using "users" collection
+
+    const { username, password } = req.body;
+    const userdata = {
       username: username,
       password: password,
-    });
+    };
 
-    userdata.save();
+    await users.insertOne(userdata);
 
+    console.log("Write OK");
     res.send("OK");
   } catch (error) {
-    console.log("[ E R R O R=====================================E R R O R ]");
+    console.log(
+      "[ E R R O R ===================================== E R R O R ]"
+    );
     console.error(error);
-    console.log("[ E R R O R=====================================E R R O R ]");
+    console.log(
+      "[ E R R O R ===================================== E R R O R ]"
+    );
 
     res.send("ERROR");
   }
 });
 
 server.listen(port, () => {
-  console.log("server on " + port);
+  console.log(`Server on ${port} Port`);
 });
