@@ -25,7 +25,7 @@ const replicaSet = [
 // const replicaSet = ["127.0.0.1:27019"];
 
 let mongoClient; // connected mongoDB client
-let noReplMongo = [];
+let noReplHosts = [];
 
 const conn = async (index) => {
   try {
@@ -35,9 +35,9 @@ const conn = async (index) => {
     }
 
     console.log(
-      `Try MongoDB Connection - Index ${index} : ${replicaSet[index]} (${
-        index + 1
-      }/${replicaSet.length})`
+      `\n<< Try MongoDB Connection >>\n>> Index ${index} : ${
+        replicaSet[index]
+      } (${index + 1}/${replicaSet.length})`
     );
 
     MongoClient.connect(`mongodb://${replicaSet[index]}/test`, {
@@ -52,7 +52,9 @@ const conn = async (index) => {
     })
       .then((client) => {
         // connectoin success mongoDB
-        console.log(`<< Success MongoDB Connection : ${replicaSet[index]} >>`);
+        console.log(
+          `\n<< Success MongoDB Connection : ${replicaSet[index]} >>`
+        );
 
         client // excute mongosh command db.isMaster();
           .db()
@@ -70,23 +72,22 @@ const conn = async (index) => {
               replicaSet에 add 하고 mongoClient = client; => X
               에러 처리 하고 변수에 넣어서 primary 연결까지 loop 돌다가 primary 만나면 rs.add & 변수에서 제거
               */
-              console.log("<< No ReplicaSet MongoDB>>");
+              console.log("\n<< No ReplicaSet MongoDB>>");
               console.log("==> Retry MongoDB Connection");
 
               // throw new Error("NoReplicaSet");
-              noReplMongo.push(replicaSet[index]);
+              noReplHosts.push(replicaSet[index]);
               await conn(index + 1);
             } else if (res.ismaster) {
               mongoClient = client; // sync => so, sometimes...client is undefined
-              console.log("<< Success Set Primary to MongoClient >>");
+              console.log("\n<< Success Set Primary to MongoClient >>");
 
-              if (noReplMongo.length) {
-                // rs.add && noReplMongo clear
-                cli;
+              if (noReplHosts.length) {
+                // rs.add && noReplHosts clear
               }
             } else {
               //   } else if (res.secondary) {
-              console.log("<< This MongoDB is Secondary >>");
+              console.log("\n<< This MongoDB is Secondary >>");
               console.log("==> Retry MongoDB Connection");
 
               // throw new Error("Secondary");
@@ -109,7 +110,7 @@ const conn = async (index) => {
       })
       .catch(async (error) => {
         // connection fail mongoDB
-        console.error(`<< MongoDB Connection Error : ${error.message} >>`);
+        console.error(`\n<< MongoDB Connection Error : ${error.message} >>`);
         if (
           //   index < replicaSet.length &&
           error.message === `connect ECONNREFUSED ${replicaSet[index]}` // if mongoDB server down
@@ -124,7 +125,7 @@ const conn = async (index) => {
         }
       });
   } catch (error) {
-    console.error(`<< Server Error : ${error.message} >>`);
+    console.error(`\n<< Server Error : ${error.message} >>`);
   }
 };
 
@@ -139,15 +140,71 @@ MongoClient.connect("mongodb://127.0.0.1:27018/test", {
   serverSelectionTimeoutMS: 2000,
   directConnection: true,
 })
-  .then((client) => {
-    client
-      .db()
-      .admin()
-      .command({ replSetGetConfig: 1 })
-      //   .command({ replSetReconfig: 1 })
-      .then((res) => {
-        console.log(res);
-      });
+  .then(async (client) => {
+    const adminDB = client.db().admin();
+    let setName, version, me;
+    let memberIndex = 0;
+    let memberHosts = [];
+    let newMembers = [];
+
+    await adminDB.command({ isMaster: 1 }).then((res) => {
+      // get who am I
+      setName = res.setName;
+      version = res.setVersion;
+      me = res.me;
+
+      //   newMembers.push({ _id: memberIndex, host: me });
+      //   memberIndex += 1;
+
+      for (const host of res.hosts) {
+        newMembers.push({ _id: memberIndex, host: host });
+        // memberHosts.push(host);
+        memberIndex++;
+
+        if (host === me) {
+          continue;
+        }
+
+        // newMembers.push({ _id: memberIndex, host: host });
+        memberHosts.push(host);
+        // memberIndex++;
+      }
+    });
+
+    if (noReplHosts.length) {
+      for (const host of noReplHosts) {
+        newMembers.push({ _id: memberIndex, host: host });
+
+        memberIndex++;
+      }
+
+      noReplHosts = [];
+    }
+
+    console.log("\n<< Success Set New ReplicaSet Members >>");
+    // console.log(newMembers);
+
+    const dropMember = {
+      dropConnections: 1,
+      hostAndPort: memberHosts,
+    };
+    const newConfig = {
+      _id: setName,
+      version: version + 1,
+      members: newMembers,
+    };
+
+    // console.log(dropMember);
+    // console.log(newConfig);
+
+    await adminDB.command(dropMember).then((res) => {
+      console.log("\n<< Success Drop Members >>");
+      console.log(res);
+    });
+    await adminDB.command({ replSetReconfig: newConfig }).then((res) => {
+      console.log("\n<< Success ReplicaSet Reconfig >>");
+      console.log(res);
+    });
   })
   .catch((error) => {
     console.log(error.message);
@@ -210,5 +267,5 @@ app.get("/write", async (req, res, next) => {
 });
 
 server.listen(port, () => {
-  console.log(`Server on ${port} Port`);
+  console.log(`\n<< Server on ${port} Port >>`);
 });
