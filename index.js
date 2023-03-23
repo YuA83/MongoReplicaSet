@@ -18,9 +18,9 @@ const replicaSet = [
   "127.0.0.1:27017",
   "127.0.0.1:27018",
   "127.0.0.1:27019",
-  "127.0.0.1:27020",
-]; // replicaSet hosts => error.reason => servers.Map(3)
-// const replicaSet = ["mongo1:27017", "mongo2:27018", "mongo3:27019"]; // replicaSet hosts => error.reason => servers.Map(1)
+  //   "127.0.0.1:27020",
+];
+// const replicaSet = ["mongo1:27017", "mongo2:27018", "mongo3:27019"];
 // const replicaSet = ["127.0.0.1:27018", "127.0.0.1:27019"];
 // const replicaSet = ["127.0.0.1:27019"];
 
@@ -61,17 +61,13 @@ const conn = async (index) => {
           .command({ isMaster: 1 })
           .then(async (res) => {
             // console.log(res);
-            console.log(`>> ismaster \t==> ${res.ismaster}`); // false, true
-            console.log(`>> secondary \t==> ${res.secondary}`); // true, undefined
-            console.log(`>> primary \t==> ${res.primary}`); // mongo2:27017, undefined
-            console.log(`>> me \t\t==> ${res.me}`); // mongo1:27017, undefined
+            console.log(`>> ismaster \t==> ${res.ismaster}`); // replicaSet member? false :  true
+            console.log(`>> secondary \t==> ${res.secondary}`); // replicaSet member? true : undefined
+            console.log(`>> primary \t==> ${res.primary}`); // replicaSet member? mongo2:27017 : undefined
+            console.log(`>> me \t\t==> ${res.me}`); // replicaSet member? mongo1:27017 : undefined
             console.log("<< ========================== >>");
 
             if (res.me === undefined) {
-              /*
-              replicaSet에 add 하고 mongoClient = client; => X
-              에러 처리 하고 변수에 넣어서 primary 연결까지 loop 돌다가 primary 만나면 rs.add & 변수에서 제거
-              */
               console.log("\n<< No ReplicaSet MongoDB>>");
               console.log("==> Retry MongoDB Connection");
 
@@ -147,27 +143,28 @@ MongoClient.connect("mongodb://127.0.0.1:27018/test", {
     let memberHosts = [];
     let newMembers = [];
 
+    // check pre-version replicaSet config
+    // rs.conf() or rs.status()
+    // await adminDB.command({ replSetGetConfig: 1 }).then((res) => {
+    //   console.log("<< Success Get ReplicaSet Config >>");
+    //   console.log(res);
+    // });
+
+    // db.isMaster()
     await adminDB.command({ isMaster: 1 }).then((res) => {
-      // get who am I
       setName = res.setName;
       version = res.setVersion;
       me = res.me;
 
-      //   newMembers.push({ _id: memberIndex, host: me });
-      //   memberIndex += 1;
-
       for (const host of res.hosts) {
         newMembers.push({ _id: memberIndex, host: host });
-        // memberHosts.push(host);
         memberIndex++;
 
         if (host === me) {
           continue;
         }
 
-        // newMembers.push({ _id: memberIndex, host: host });
         memberHosts.push(host);
-        // memberIndex++;
       }
     });
 
@@ -182,7 +179,6 @@ MongoClient.connect("mongodb://127.0.0.1:27018/test", {
     }
 
     console.log("\n<< Success Set New ReplicaSet Members >>");
-    // console.log(newMembers);
 
     const dropMember = {
       dropConnections: 1,
@@ -194,13 +190,12 @@ MongoClient.connect("mongodb://127.0.0.1:27018/test", {
       members: newMembers,
     };
 
-    // console.log(dropMember);
-    // console.log(newConfig);
-
+    // rs.remove()
     await adminDB.command(dropMember).then((res) => {
       console.log("\n<< Success Drop Members >>");
       console.log(res);
     });
+    // rs.add() or rs.reconfig()
     await adminDB.command({ replSetReconfig: newConfig }).then((res) => {
       console.log("\n<< Success ReplicaSet Reconfig >>");
       console.log(res);
