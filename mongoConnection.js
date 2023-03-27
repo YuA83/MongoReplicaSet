@@ -1,28 +1,25 @@
-const express = require("express");
-const cookieParser = require("cookie-parser");
-const http = require("http");
-
 /**
  * https://www.mongodb.com/docs/drivers/node/current/quick-reference/
  */
 const { MongoClient } = require("mongodb"); // using MongoDB Node.js Driver (Not mongoose)
 
-const app = express();
-const server = http.createServer(app);
-const port = 9700;
-
-app.use(express.json());
-app.use(cookieParser());
-
 const replicaSet = [
-  "127.0.0.1:27017",
-  "127.0.0.1:27018",
-  "127.0.0.1:27019",
+  "127.0.0.1:27017", // mongo1:27017
+  "127.0.0.1:27018", // mongo2:27018
+  "127.0.0.1:27019", // mongo3:27019
   //   "127.0.0.1:27020",
 ];
-// const replicaSet = ["mongo1:27017", "mongo2:27018", "mongo3:27019"];
-// const replicaSet = ["127.0.0.1:27018", "127.0.0.1:27019"];
-// const replicaSet = ["127.0.0.1:27019"];
+
+const option = {
+  auth: {
+    username: "root", // mongosh username
+    password: "root!", // mongosh password
+  },
+  // replicaSet: "myReplicaSet", // replicaSet name
+  authSource: "admin", // user's auth database
+  serverSelectionTimeoutMS: 2000, // server select timeout limit
+  directConnection: true,
+};
 
 let mongoClient; // connected mongoDB client
 let noReplHosts = [];
@@ -40,16 +37,7 @@ const conn = async (index) => {
       } (${index + 1}/${replicaSet.length})`
     );
 
-    MongoClient.connect(`mongodb://${replicaSet[index]}/test`, {
-      auth: {
-        username: "root", // mongosh username
-        password: "root!", // mongosh password
-      },
-      // replicaSet: "myReplicaSet", // replicaSet name
-      authSource: "admin", // user's auth database
-      serverSelectionTimeoutMS: 2000, // server select timeout limit
-      directConnection: true,
-    })
+    MongoClient.connect(`mongodb://${replicaSet[index]}/test`, option)
       .then(async (client) => {
         // connectoin success mongoDB
         console.log(
@@ -179,145 +167,43 @@ const conn = async (index) => {
   }
 };
 
-conn(0); // try connect mongoDB replicaSet
+const connV2 = async () => {
+  for (const replica of replicaSet) {
+    try {
+      const client = await MongoClient.connect(
+        `mongodb://${replica}/test`,
+        option
+      );
 
-// test code
-/*
-const testPrimary = "127.0.0.1:27017";
-MongoClient.connect(`mongodb://${testPrimary}/test`, {
-  auth: {
-    username: "root",
-    password: "root!",
-  },
-  authSource: "admin",
-  serverSelectionTimeoutMS: 2000,
-  directConnection: true,
-})
-  .then(async (client) => {
-    const adminDB = client.db().admin();
-    let setName, version, me;
-    let memberIndex = 0;
-    let memberHosts = [];
-    let newMembers = [];
+      if (client) {
+        console.log(`\n<< Success Connection >>\n>> ${replica}`);
 
-    // check pre-version replicaSet config
-    // rs.conf() or rs.status()
-    // await adminDB.command({ replSetGetConfig: 1 }).then((res) => {
-    //   console.log("<< Success Get ReplicaSet Config >>");
-    //   console.log(res);
-    // });
+        const mongoCommand = await client.db().admin().command({ isMaster: 1 });
 
-    // db.isMaster()
-    await adminDB.command({ isMaster: 1 }).then((res) => {
-      setName = res.setName;
-      version = res.setVersion;
-      me = res.me;
-
-      for (const host of res.hosts) {
-        newMembers.push({ _id: memberIndex, host: host });
-        memberIndex++;
-
-        if (host === me) {
+        if (mongoCommand.ismaster) {
+          console.log(`\n<< Master(Primary) MongoDB >>\n>> ${replica}`);
+          //   mongoClient = client;
+          //   break;
+          return client;
+        } else {
           continue;
         }
-
-        memberHosts.push(host);
       }
-    });
-
-    if (noReplHosts.length) {
-      for (const host of noReplHosts) {
-        newMembers.push({ _id: memberIndex, host: host });
-
-        memberIndex++;
+    } catch (error) {
+      if (error.message === `connect ECONNREFUSED ${replica}`) {
+        console.log("\n<< Retry Connection >>");
+        continue;
+      } else {
+        console.log("\n<< MongoDB Connection Error >>");
+        console.error(error);
+        throw new Error(error);
       }
-
-      noReplHosts = [];
     }
-
-    console.log("\n<< Success Set New ReplicaSet Members >>");
-
-    const dropMember = {
-      dropConnections: 1,
-      hostAndPort: memberHosts,
-    };
-    const newConfig = {
-      _id: setName,
-      version: version + 1,
-      members: newMembers,
-    };
-
-    // rs.remove()
-    await adminDB.command(dropMember).then((res) => {
-      console.log("\n<< Success Drop Members >>");
-      console.log(res);
-    });
-    // rs.add() or rs.reconfig()
-    await adminDB.command({ replSetReconfig: newConfig }).then((res) => {
-      console.log("\n<< Success ReplicaSet Reconfig >>");
-      console.log(res);
-    });
-  })
-  .catch((error) => {
-    console.log(error.message);
-    console.log(error.reason);
-  });
-*/
-app.get("/read", async (req, res, next) => {
-  // testing mongoDB client read
-  try {
-    const db = mongoClient.db("test"); // using "test" database
-    const users = db.collection("users"); // using "users" collection
-    const user = await users.findOne();
-    const userList = await users.find().toArray(); // require toArray() if you want to get all data
-
-    console.log("Read OK");
-    res.send({
-      user: user,
-      userList: userList,
-    });
-  } catch (error) {
-    console.log(
-      "[ E R R O R ===================================== E R R O R ]"
-    );
-    console.error(error);
-    console.log(
-      "[ E R R O R ===================================== E R R O R ]"
-    );
-
-    res.send("ERROR");
   }
-});
+};
 
-app.get("/write", async (req, res, next) => {
-  // testing mongoDB client write
-  try {
-    const db = mongoClient.db("test"); // using "test" database
-    const users = db.collection("users"); // using "users" collection
-
-    const { username, password } = req.body;
-    const userdata = {
-      username: username,
-      password: password,
-    };
-
-    await users.insertOne(userdata);
-
-    console.log("Write OK");
-    res.send("OK");
-  } catch (error) {
-    console.log(
-      "[ E R R O R ===================================== E R R O R ]"
-    );
-    console.error(error);
-    console.log(
-      "[ E R R O R ===================================== E R R O R ]"
-    );
-
-    res.send("ERROR");
-  }
-});
-
-server.listen(port, () => {
-  console.log(`\n<< Server on ${port} Port >>`);
-});
+module.exports = {
+  //   conn,
+  //   mongoClient,
+  connV2,
+};
