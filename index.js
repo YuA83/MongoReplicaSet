@@ -46,7 +46,8 @@ const conn = async () => {
         if (mongoCommand.ismaster) {
           console.log(`${replica} is master`);
           mongoClient = client;
-          break;
+          return client;
+          //   break;
         } else {
           continue;
         }
@@ -170,9 +171,10 @@ const conn = async () => {
 app.get("/read", async (req, res, next) => {
   // testing mongoDB client read
   try {
-    await conn();
+    const client = await conn();
 
-    const db = mongoClient.db("test"); // using "test" database
+    // const db = mongoClient.db("test"); // using "test" database
+    const db = client.db("test"); // using "test" database
     const users = db.collection("users"); // using "users" collection
     // const user = await users.findOne();
     const userList = await users.find().toArray(); // require toArray() if you want to get all data
@@ -199,9 +201,10 @@ app.get("/read", async (req, res, next) => {
 app.get("/write", async (req, res, next) => {
   // testing mongoDB client write
   try {
-    await conn();
+    const client = await conn();
 
-    const db = mongoClient.db("test"); // using "test" database
+    // const db = mongoClient.db("test"); // using "test" database
+    const db = client.db("test"); // using "test" database
     const users = db.collection("users"); // using "users" collection
 
     const { username, password } = req.body;
